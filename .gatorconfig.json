@@ -1,0 +1,2 @@
+// File servers only as a reminder. We store actual file in /home/user/.gatorconfig.json
+//{"db_url":"postgres://example","current_user_name":"zeelna"}
