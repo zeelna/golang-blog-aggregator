@@ -74,6 +74,8 @@ func main() {
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerUsers)
+
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
 
@@ -107,28 +109,32 @@ func (c *commands) register(name string, f func(*State, command) error) {
 	(*c).allowedCommands[name] = f
 }
 
-func handlerReset(s *State, cmd command) error {
-	if err := s.db.ResetUsers(context.Background()); err != nil {
-		return fmt.Errorf("error, failed to reset database of users")
+// Function to handle command <login some_username>. Update State struct, if some_username passed
+func handlerLogin(s *State, cmd command) error {
+	if len(cmd.args) == 0 {
+		return fmt.Errorf("error, command <login> expects a single argument")
 	}
-	if err := (*s).config.SetUser(""); err != nil {
+	username := cmd.args[0]
+
+	// must run "sqlc generate" via CLI each time we update ./sql/queries/*.sql
+	user, err := s.db.GetUser(context.Background(), username)
+	if err != nil {
 		return err
 	}
 
-	fmt.Println("Successfully deleted the database of users.")
+	if err := (*s).config.SetUser(user.Name); err != nil {
+		return err
+	}
+	fmt.Println(fmt.Sprintf("User '%s' has been set", user.Name))
 	return nil
 }
 
-// Function to handle command <login some_username>. Update State struct, if some_username passed
+// Function to handle command <register some_username>. Update State struct, does not yet exist
 func handlerRegister(s *State, cmd command) error {
 	if len(cmd.args) == 0 {
 		return fmt.Errorf("error, command <register> expects a single argument")
 	}
 	username := cmd.args[0]
-	//if err := (*s).config.SetUser(username); err != nil {
-	//	return err
-	//}
-	//fmt.Println(fmt.Sprintf("User '%s' has been set", username))
 
 	user, err := s.db.CreateUser(context.Background(), database.CreateUserParams{
 		ID:        uuid.New(),
@@ -153,23 +159,34 @@ func handlerRegister(s *State, cmd command) error {
 	return nil
 }
 
-// Function to handle command <login some_username>. Update State struct, if some_username passed
-func handlerLogin(s *State, cmd command) error {
-	if len(cmd.args) == 0 {
-		return fmt.Errorf("error, command <login> expects a single argument")
+func handlerReset(s *State, cmd command) error {
+	if err := s.db.ResetUsers(context.Background()); err != nil {
+		return fmt.Errorf("error, failed to reset database of users")
 	}
-	username := cmd.args[0]
+	if err := (*s).config.SetUser(""); err != nil {
+		return err
+	}
 
-	// must run "sqlc generate" via CLI each time we update ./sql/queries/*.sql
-	user, err := s.db.GetUser(context.Background(), username)
+	fmt.Println("Successfully deleted the database of users.")
+	return nil
+}
+
+func handlerUsers(s *State, cmd command) error {
+	users, err := s.db.GetUsers(context.Background())
 	if err != nil {
-		return err
+		return fmt.Errorf("error, failed to get users from database")
+	}
+	if len(users) == 0 {
+		return fmt.Errorf("error, no users in database to display")
 	}
 
-	if err := (*s).config.SetUser(user.Name); err != nil {
-		return err
+	for _, user := range users {
+		if user.Name == (*s).config.CurrentUsername {
+			fmt.Printf("* %s (current)\n", user.Name)
+		} else {
+			fmt.Printf("* %s\n", user.Name)
+		}
 	}
-	fmt.Println(fmt.Sprintf("User '%s' has been set", user.Name))
 	return nil
 }
 
