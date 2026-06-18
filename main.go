@@ -1,59 +1,82 @@
 package main
 
 import (
+	"context"
+	"database/sql"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	_ "github.com/lib/pq"
+	"github.com/zeelna/golang-blog-aggregator/internal/database"
+)
+
+import (
 	//"bufio"
 	"fmt"
 	"log"
 	"os"
-	"strings"
-
 	//"github.com/zeelna/golang-blog-aggregator/internal/cmds"
 	"github.com/zeelna/golang-blog-aggregator/internal/config"
 )
 
+type State struct {
+	db     *database.Queries
+	config *config.Config
+}
+
 func main() {
+	// Step #0. Database config
+	// Read from ~/.gatorconfig.json (add it's filepath to .gitignore to avoid credential leak)
 	cfg, err := config.Read()
 	if err != nil {
 		fmt.Println("Failed to read filepath ~/.gatorconfig.json")
+		return
 	}
 
-	/* Task 1 */
-	// DEBUG: Print struct before we write:
-	//fmt.Printf("%+v\n", cfg)
+	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	if err != nil {
+		fmt.Print("Failed to open database")
+		return
+	}
+	// use the generated 'database' package to create new *database.Queries and store into 'state' struct
+	dbQueries := database.New(db)
 
-	// Set state with the configuration
+	// Set state with the database.Queries and database configuration (URL and username)
 	var state = State{
+		db:     dbQueries,
 		config: &cfg,
 	}
 
+	/* Step #2: Read command-line arguments and verify if correct */
+	// DEBUG: Print struct before we write:
+	//fmt.Printf("%+v\n", cfg)
 	if len(os.Args) < 2 {
 		log.Fatalf("error: not enough arguments provided")
 	}
 
-	/*
-		input := strings.Join(os.Args[1:], " ")
-		cleanedInputs := cleanInput(input)
-	*/
-
 	argsWithoutProg := os.Args[1:]
 	cleanedInputs := cleanArgs(argsWithoutProg)
 
+	// Step #3: Create the command, once user's CLI input verified
 	// initialize 'command' object
 	var cmd command
 	cmd, err = makeCommand(cleanedInputs)
 	if err != nil {
 		fmt.Print(err)
 	}
-
-	// Initialize commands object.
+	// Create 'commands' that holds map of allowed 'command' we can run
 	cmds := commands{
 		allowedCommands: make(map[string]func(*State, command) error),
 	}
 
+	// Step #4: Register the created command, to be run / allowed
 	cmds.register("login", handlerLogin)
+	cmds.register("register", handlerRegister)
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
 
+	// Step #5: Run the command
 	if err := cmds.run(&state, cmd); err != nil {
 		log.Fatal(err)
 	}
@@ -64,10 +87,6 @@ func main() {
 	return
 
 } // end of main
-
-type State struct {
-	config *config.Config
-}
 
 type command struct {
 	name string   // login
@@ -88,15 +107,56 @@ func (c *commands) register(name string, f func(*State, command) error) {
 }
 
 // Function to handle command <login some_username>. Update State struct, if some_username passed
+func handlerRegister(s *State, cmd command) error {
+	if len(cmd.args) == 0 {
+		return fmt.Errorf("error, command <register> expects a single argument")
+	}
+	username := cmd.args[0]
+	//if err := (*s).config.SetUser(username); err != nil {
+	//	return err
+	//}
+	//fmt.Println(fmt.Sprintf("User '%s' has been set", username))
+
+	user, err := s.db.CreateUser(context.Background(), database.CreateUserParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      username,
+	})
+
+	if err != nil {
+		return fmt.Errorf("error: user already exists in table")
+	}
+
+	if err := (*s).config.SetUser(user.Name); err != nil {
+		return err
+	}
+
+	fmt.Printf("User %s created\n", user.Name)
+	fmt.Printf(
+		"User ID: %v\nUser name: %v\nCreated_At: %v\nUpdated_At: %v\n",
+		user.ID, user.Name, user.CreatedAt, user.UpdatedAt,
+	)
+	return nil
+}
+
+// Function to handle command <login some_username>. Update State struct, if some_username passed
 func handlerLogin(s *State, cmd command) error {
 	if len(cmd.args) == 0 {
 		return fmt.Errorf("error, command <login> expects a single argument")
 	}
 	username := cmd.args[0]
-	if err := (*s).config.SetUser(username); err != nil {
+
+	// must run "sqlc generate" via CLI each time we update ./sql/queries/*.sql
+	user, err := s.db.GetUser(context.Background(), username)
+	if err != nil {
 		return err
 	}
-	fmt.Println(fmt.Sprintf("User '%s' has been set", username))
+
+	if err := (*s).config.SetUser(user.Name); err != nil {
+		return err
+	}
+	fmt.Println(fmt.Sprintf("User '%s' has been set", user.Name))
 	return nil
 }
 
@@ -124,8 +184,10 @@ func cleanInput(text string) []string {
 }
 
 func cleanArgs(args []string) []string {
+	// lowercase the command only
+	args[0] = strings.ToLower(args[0])
 	for i, arg := range args {
-		args[i] = strings.ToLower(strings.TrimSpace(arg))
+		args[i] = strings.TrimSpace(arg)
 	}
 	return args
 }
