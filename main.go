@@ -73,6 +73,7 @@ func main() {
 	// Step #4: Register the created command, to be run / allowed
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
 
@@ -104,6 +105,18 @@ func (c *commands) register(name string, f func(*State, command) error) {
 		fmt.Println("error, already exists")
 	}
 	(*c).allowedCommands[name] = f
+}
+
+func handlerReset(s *State, cmd command) error {
+	if err := s.db.ResetUsers(context.Background()); err != nil {
+		return fmt.Errorf("error, failed to reset database of users")
+	}
+	if err := (*s).config.SetUser(""); err != nil {
+		return err
+	}
+
+	fmt.Println("Successfully deleted the database of users.")
+	return nil
 }
 
 // Function to handle command <login some_username>. Update State struct, if some_username passed
