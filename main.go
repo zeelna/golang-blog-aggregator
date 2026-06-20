@@ -45,6 +45,23 @@ type RSSItem struct {
 	PubDate     string `xml:"pubDate"`
 }
 
+func middlewareLoggedIn(handler func(s *State, cmd command, user database.User) error) func(*State, command) error {
+	// Ensure user is logged in before 'addfeed' 'follow' or 'following' operations. These require user to be logged in
+	return func(s *State, cmd command) error {
+		// #1 get the current user from config
+		username := s.config.CurrentUsername
+
+		// #2 Look up the user in the database
+		user, err := s.db.GetUser(context.Background(), username)
+		if err != nil {
+			return err
+		} // uses methods in internal/database/users.sql.go
+
+		// #3 pass the retrieved user into the actual handler
+		return handler(s, cmd, user)
+	}
+}
+
 func handlerAgg(s *State, cmd command) error {
 	feedUrl := "https://www.wagslane.dev/index.xml"
 	feedPointer, err := fetchFeed(context.Background(), feedUrl)
@@ -176,10 +193,10 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
-	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	cmds.register("feeds", handlerFeeds)
-	cmds.register("follow", handlerFollow)
-	cmds.register("following", handlerFollowing)
+	cmds.register("follow", middlewareLoggedIn(handlerFollow))
+	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
@@ -220,7 +237,7 @@ func handlerLogin(s *State, cmd command) error {
 		return fmt.Errorf("error, command <login> expects a single argument")
 	}
 	username := cmd.args[0]
-
+	// todo move into login
 	// must run "sqlc generate" via CLI each time we update ./sql/queries/*.sql
 	user, err := s.db.GetUser(context.Background(), username)
 	if err != nil {
@@ -296,17 +313,10 @@ func handlerUsers(s *State, cmd command) error {
 	return nil
 }
 
-func handlerAddFeed(s *State, cmd command) error {
+func handlerAddFeed(s *State, cmd command, user database.User) error {
 	if len(cmd.args) < 2 {
 		return fmt.Errorf("error, command <addfeed> expects a two argument. Usage: addfeed my_feed https://example.org")
 	}
-	// Get current logged (from .gatorconfig.json), as mark as author of the feed
-	username := (*s).config.CurrentUsername
-	// Retrieve that username from table 'users' and get ID
-	user, err := s.db.GetUser(context.Background(), username)
-	if err != nil {
-		return err
-	} // uses methods in internal/database/users.sql.go
 
 	// 'addfeed' command requires two arguments, to set the new Feed entry in database
 	feedName := cmd.args[0]
@@ -364,7 +374,7 @@ func handlerFeeds(s *State, cmd command) error {
 
 }
 
-func handlerFollow(s *State, cmd command) error {
+func handlerFollow(s *State, cmd command, user database.User) error {
 	if len(cmd.args) < 1 {
 		return fmt.Errorf("error, command <follow> expects a single argument. Usage: follow https://example.org")
 	}
@@ -374,13 +384,6 @@ func handlerFollow(s *State, cmd command) error {
 	if err != nil {
 		return err
 	} // uses methods in internal/database/feeds.sql.go
-
-	// retrieve above, from 'users' table by username
-	username := (*s).config.CurrentUsername
-	user, err := s.db.GetUser(context.Background(), username)
-	if err != nil {
-		return err
-	} // uses methods in internal/database/users.sql.go
 
 	// Create the many-many relationship via 'feed-follows' joining-table
 	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
@@ -393,17 +396,10 @@ func handlerFollow(s *State, cmd command) error {
 	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
-func handlerFollowing(s *State, cmd command) error {
-	username := (*s).config.CurrentUsername
-	user, err := s.db.GetUser(context.Background(), username)
-	if err != nil {
-		return err
-	} // uses methods in internal/database/users.sql.go
-
+func handlerFollowing(s *State, cmd command, user database.User) error {
 	follows, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
 	if err != nil {
 		return err
@@ -413,7 +409,6 @@ func handlerFollowing(s *State, cmd command) error {
 	for _, follow := range follows {
 		fmt.Println("Feed name: %s\n", follow.FeedName)
 	}
-
 	return nil
 }
 
