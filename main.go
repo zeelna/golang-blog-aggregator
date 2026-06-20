@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -215,6 +216,7 @@ func main() {
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
@@ -247,6 +249,43 @@ func (c *commands) register(name string, f func(*State, command) error) {
 		fmt.Println("error, already exists")
 	}
 	(*c).allowedCommands[name] = f
+}
+
+func handlerBrowse(s *State, cmd command, user database.User) error {
+	var userLimit int = 2 // default, if no argument / wrong amount argument provided
+	var err error         // declaring err here, to avoid compiler error due to 'browseLimit, err := ...
+
+	if len(cmd.args) != 1 {
+		fmt.Println("Invalid argument. Using '2' instead by default.")
+	} else {
+		userLimit, err = strconv.Atoi(cmd.args[0])
+		if err != nil {
+			fmt.Printf("Cannot browse %s number of posts, invalid argument.\n", cmd.args[0])
+			return err
+		}
+	}
+	// Convert into int32, due to SQL requirement
+	browseLimit := int32(userLimit)
+
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  browseLimit,
+	})
+	if err != nil {
+		return err
+	}
+	// Print posts to terminal
+	fmt.Println("Posts for User: ", user.Name)
+	for _, post := range posts {
+		fmt.Printf("Post ID: %v\n", post.ID)
+		fmt.Printf("Post Title: %v\n", post.Title)
+		fmt.Printf("Post Published: %v\n", post.PublishedAt)
+		fmt.Printf("Reader User Name: %v\n", post.UserName)
+		fmt.Printf("Post Feed ID: %v\n", post.FeedID)
+		fmt.Printf("Post User ID: %v\n", post.UserID)
+
+	}
+	return nil
 }
 
 // Function to handle command <login some_username>. Update State struct, if some_username passed
@@ -466,8 +505,41 @@ func scrapeFeeds(s *State) error {
 	fmt.Printf("Channel Title: %s\n", feedPointer.Channel.Title)
 	fmt.Printf("Channel Link: %s\n", feedPointer.Channel.Link)
 	for _, item := range feedPointer.Channel.Item {
-		fmt.Printf("- Title: #%s\n", item.Title)
+
+		// must swap into sql.NullString, due to schema (005.posts.schema)
+		description := sql.NullString{
+			String: item.Description,
+			Valid:  item.Description != "",
+		}
+
+		// must convert time format, and swap to sql.NullTime due to schema (005.posts.sql)
+		pubDate, err := time.Parse(time.RFC1123Z, item.PubDate) // Or whichever format the feed uses
+		publishedAt := sql.NullTime{
+			Time:  pubDate,
+			Valid: err == nil,
+		}
+
+		createdPost, err := s.db.CreatePost(context.Background(), database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			Title:       item.Title,
+			Url:         item.Link,
+			Description: description,
+			PublishedAt: publishedAt,
+			FeedID:      feedToFetch.ID,
+		})
+		if err != nil {
+			if err == sql.ErrNoRows {
+				// This means it was a duplicate, we can ignore it!
+				continue
+			} else {
+				return err
+			}
+		}
+		fmt.Printf("- Title: #%s\n", createdPost.Title)
 	}
+
 	return nil
 
 }
