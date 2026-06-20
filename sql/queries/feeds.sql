@@ -5,3 +5,6 @@ VALUES (  $1, $2,  $3,  $4,  $5, $6) RETURNING *;
 -- name: GetFeeds :many
 SELECT feeds.name, feeds.url, users.name AS author_name FROM feeds
 INNER JOIN users ON users.id = feeds.user_id;
+
+-- name: GetFeed :one
+SELECT * FROM feeds WHERE url = $1;

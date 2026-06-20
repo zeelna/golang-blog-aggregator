@@ -178,6 +178,8 @@ func main() {
 	cmds.register("agg", handlerAgg)
 	cmds.register("addfeed", handlerAddFeed)
 	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", handlerFollow)
+	cmds.register("following", handlerFollowing)
 
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
@@ -223,7 +225,7 @@ func handlerLogin(s *State, cmd command) error {
 	user, err := s.db.GetUser(context.Background(), username)
 	if err != nil {
 		return err
-	}
+	} // uses methods in internal/database/users.sql.go
 
 	if err := (*s).config.SetUser(user.Name); err != nil {
 		return err
@@ -244,7 +246,7 @@ func handlerRegister(s *State, cmd command) error {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Name:      username,
-	})
+	}) // uses methods in internal/database/users.sql.go
 
 	if err != nil {
 		return fmt.Errorf("error: user already exists in table")
@@ -265,7 +267,7 @@ func handlerRegister(s *State, cmd command) error {
 func handlerReset(s *State, cmd command) error {
 	if err := s.db.ResetUsers(context.Background()); err != nil {
 		return fmt.Errorf("error, failed to reset database of users")
-	}
+	} // uses methods in internal/database/users.sql.go
 	if err := (*s).config.SetUser(""); err != nil {
 		return err
 	}
@@ -276,6 +278,7 @@ func handlerReset(s *State, cmd command) error {
 
 func handlerUsers(s *State, cmd command) error {
 	users, err := s.db.GetUsers(context.Background())
+	// uses methods in internal/database/users.sql.go
 	if err != nil {
 		return fmt.Errorf("error, failed to get users from database")
 	}
@@ -303,7 +306,8 @@ func handlerAddFeed(s *State, cmd command) error {
 	user, err := s.db.GetUser(context.Background(), username)
 	if err != nil {
 		return err
-	}
+	} // uses methods in internal/database/users.sql.go
+
 	// 'addfeed' command requires two arguments, to set the new Feed entry in database
 	feedName := cmd.args[0]
 	feedUrl := cmd.args[1]
@@ -315,9 +319,21 @@ func handlerAddFeed(s *State, cmd command) error {
 		Name:      feedName,
 		Url:       feedUrl,
 		UserID:    user.ID, // retrieve above, from 'users' table
-	})
+	}) // uses methods in internal/database/feeds.sql.go
+
 	if err != nil {
 		return fmt.Errorf("error: could not create feed due to failed SQL operation. ERR: %v", err)
+	}
+
+	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		FeedID:    feed.ID, // retrieve above, from 'feeds' table
+		UserID:    user.ID, // retrieve above, from 'users' table
+	}) // uses methods in internal/database/feed_follows.sql.go
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("- Feed -\n")
@@ -335,7 +351,7 @@ func handlerFeeds(s *State, cmd command) error {
 	feeds, err := s.db.GetFeeds(context.Background())
 	if err != nil {
 		return err
-	}
+	} // uses methods in internal/database/feeds.sql.go
 
 	fmt.Println("# Here are the feeds # ")
 	for _, feed := range feeds {
@@ -346,6 +362,59 @@ func handlerFeeds(s *State, cmd command) error {
 	}
 	return nil
 
+}
+
+func handlerFollow(s *State, cmd command) error {
+	if len(cmd.args) < 1 {
+		return fmt.Errorf("error, command <follow> expects a single argument. Usage: follow https://example.org")
+	}
+	url := cmd.args[0]
+	// retrieve the 'feed' entry in table 'feeds' via CLI argument
+	feed, err := s.db.GetFeed(context.Background(), url)
+	if err != nil {
+		return err
+	} // uses methods in internal/database/feeds.sql.go
+
+	// retrieve above, from 'users' table by username
+	username := (*s).config.CurrentUsername
+	user, err := s.db.GetUser(context.Background(), username)
+	if err != nil {
+		return err
+	} // uses methods in internal/database/users.sql.go
+
+	// Create the many-many relationship via 'feed-follows' joining-table
+	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		FeedID:    feed.ID, // retrieve above, from 'feeds' table
+		UserID:    user.ID, // retrieve above, from 'users' table
+	}) // uses methods in internal/database/feed_follows.sql.go
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func handlerFollowing(s *State, cmd command) error {
+	username := (*s).config.CurrentUsername
+	user, err := s.db.GetUser(context.Background(), username)
+	if err != nil {
+		return err
+	} // uses methods in internal/database/users.sql.go
+
+	follows, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
+	if err != nil {
+		return err
+	} // uses methods in internal/database/feed_follows.sql.go
+
+	fmt.Println("# Feed Follows #")
+	for _, follow := range follows {
+		fmt.Println("Feed name: %s\n", follow.FeedName)
+	}
+
+	return nil
 }
 
 // Method run's given command with the provided State if it exists
