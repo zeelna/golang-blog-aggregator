@@ -63,27 +63,44 @@ func middlewareLoggedIn(handler func(s *State, cmd command, user database.User) 
 }
 
 func handlerAgg(s *State, cmd command) error {
-	feedUrl := "https://www.wagslane.dev/index.xml"
-	feedPointer, err := fetchFeed(context.Background(), feedUrl)
+	if len(cmd.args) < 1 {
+		return fmt.Errorf("error, command <agg> expects a single argument. Usage: agg <duration_string such as 1s, 1m, or 1h>")
+	}
+	inputTimeBetweenRequests := cmd.args[0]
+	timeBetweenRequests, err := time.ParseDuration(inputTimeBetweenRequests)
 	if err != nil {
+		fmt.Println("Could not convert command line argument to valid time.")
 		return err
 	}
-	feed := decodeHTML(feedPointer)
+	fmt.Printf("Collecting feeds every %v\n", timeBetweenRequests)
 
-	// print feed
-	fmt.Printf("Channel Title: %s\n", feed.Channel.Title)
-	fmt.Printf("Channel Link: %s\n", feed.Channel.Link)
-	fmt.Printf("Channel Description: \n%s\n", feed.Channel.Description)
-	fmt.Printf("Channel Items: \n\n")
-
-	for i, item := range feed.Channel.Item {
-		fmt.Printf("\n- Channel Item #%d -\n", i)
-		fmt.Printf("- Title: #%s\n", item.Title)
-		fmt.Printf("- Link: #%s\n", item.Link)
-		fmt.Printf("- Publication Date: #%s\n", item.PubDate)
-		fmt.Printf("- Description: \n#%s\n", item.Description)
-
+	ticker := time.NewTicker(timeBetweenRequests)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
 	}
+
+	/*
+		feedUrl := "https://www.wagslane.dev/index.xml"
+		feedPointer, err := fetchFeed(context.Background(), feedUrl)
+		if err != nil {
+			return err
+		}
+		feed := decodeHTML(feedPointer)
+
+		// print feed
+		fmt.Printf("Channel Title: %s\n", feed.Channel.Title)
+		fmt.Printf("Channel Link: %s\n", feed.Channel.Link)
+		fmt.Printf("Channel Description: \n%s\n", feed.Channel.Description)
+		fmt.Printf("Channel Items: \n\n")
+
+		for i, item := range feed.Channel.Item {
+			fmt.Printf("\n- Channel Item #%d -\n", i)
+			fmt.Printf("- Title: #%s\n", item.Title)
+			fmt.Printf("- Link: #%s\n", item.Link)
+			fmt.Printf("- Publication Date: #%s\n", item.PubDate)
+			fmt.Printf("- Description: \n#%s\n", item.Description)
+		}
+	*/
 	return nil
 }
 
@@ -238,7 +255,6 @@ func handlerLogin(s *State, cmd command) error {
 		return fmt.Errorf("error, command <login> expects a single argument")
 	}
 	username := cmd.args[0]
-	// todo move into login
 	// must run "sqlc generate" via CLI each time we update ./sql/queries/*.sql
 	user, err := s.db.GetUser(context.Background(), username)
 	if err != nil {
@@ -415,6 +431,45 @@ func handlerFollowing(s *State, cmd command, user database.User) error {
 		fmt.Printf("Feed name: %s\n", follow.FeedName)
 	}
 	return nil
+}
+
+// Retrieve the next feed we should fetch posts from
+func scrapeFeeds(s *State) error {
+	// Retrieve either
+	// 1) unfetched post (that is last_fetched_at = NULL
+	// 2) or, oldest (i.e., oldest 'last_fetched_at' table field)
+	feedToFetch, err := s.db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		return err
+	}
+
+	// Update that post with a new last_fetched_at value, current time
+	updatedFeed, err := s.db.MarkFeedFetched(context.Background(), database.MarkFeedFetchedParams{
+		UpdatedAt: time.Now(),
+		LastFetchedAt: sql.NullTime{
+			Time:  time.Now(),
+			Valid: true,
+		},
+		ID: feedToFetch.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	feedPointer, err := fetchFeed(context.Background(), updatedFeed.Url)
+	if err != nil {
+		return err
+	}
+	feedPointer = decodeHTML(feedPointer)
+
+	// print feed
+	fmt.Printf("Channel Title: %s\n", feedPointer.Channel.Title)
+	fmt.Printf("Channel Link: %s\n", feedPointer.Channel.Link)
+	for _, item := range feedPointer.Channel.Item {
+		fmt.Printf("- Title: #%s\n", item.Title)
+	}
+	return nil
+
 }
 
 // <unfollow> command accepts a feed's URL as argument, and unfollows the current user
