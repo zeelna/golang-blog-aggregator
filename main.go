@@ -177,6 +177,7 @@ func main() {
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
 	cmds.register("addfeed", handlerAddFeed)
+	cmds.register("feeds", handlerFeeds)
 
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
@@ -328,6 +329,23 @@ func handlerAddFeed(s *State, cmd command) error {
 	fmt.Printf("Author ID: %v\n", feed.UserID)
 
 	return nil
+}
+
+func handlerFeeds(s *State, cmd command) error {
+	feeds, err := s.db.GetFeeds(context.Background())
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("# Here are the feeds # ")
+	for _, feed := range feeds {
+		fmt.Printf("Feed name: %s\n", feed.Name)
+		fmt.Printf("Feed URL: %s\n", feed.Url)
+		fmt.Printf("Feed Author: %s\n", feed.AuthorName)
+		fmt.Println()
+	}
+	return nil
+
 }
 
 // Method run's given command with the provided State if it exists
