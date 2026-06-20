@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/xml"
+	"html"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -23,6 +27,102 @@ import (
 type State struct {
 	db     *database.Queries
 	config *config.Config
+}
+
+type RSSFeed struct {
+	Channel struct {
+		Title       string    `xml:"title"`
+		Link        string    `xml:"link"`
+		Description string    `xml:"description"`
+		Item        []RSSItem `xml:"item"`
+	} `xml:"channel"`
+}
+
+type RSSItem struct {
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	Description string `xml:"description"`
+	PubDate     string `xml:"pubDate"`
+}
+
+func handlerAgg(s *State, cmd command) error {
+	feedUrl := "https://www.wagslane.dev/index.xml"
+	feedPointer, err := fetchFeed(context.Background(), feedUrl)
+	if err != nil {
+		return err
+	}
+	feed := decodeHTML(feedPointer)
+
+	// print feed
+	fmt.Printf("Channel Title: %s\n", feed.Channel.Title)
+	fmt.Printf("Channel Link: %s\n", feed.Channel.Link)
+	fmt.Printf("Channel Description: \n%s\n", feed.Channel.Description)
+	fmt.Printf("Channel Items: \n\n")
+
+	for i, item := range feed.Channel.Item {
+		fmt.Printf("\n- Channel Item #%d -\n", i)
+		fmt.Printf("- Title: #%s\n", item.Title)
+		fmt.Printf("- Link: #%s\n", item.Link)
+		fmt.Printf("- Publication Date: #%s\n", item.PubDate)
+		fmt.Printf("- Description: \n#%s\n", item.Description)
+
+	}
+	return nil
+}
+
+// Function to decode escaped HTML entities (like &ldquo)
+func decodeHTML(rssFeed *RSSFeed) *RSSFeed {
+	(*rssFeed).Channel.Title = html.UnescapeString((*rssFeed).Channel.Title)
+	(*rssFeed).Channel.Description = html.UnescapeString((*rssFeed).Channel.Description)
+
+	for i, _ := range rssFeed.Channel.Item {
+		// must be "&rssFeed", because 'item := rssFeed' creates a copy.
+		item := &rssFeed.Channel.Item[i] // & gives a *RSSItem pointing at the real element
+		// using pointer to that item, to reassign its underlying value to be "unescapedString()"
+		item.Title = html.UnescapeString(item.Title)
+		item.Description = html.UnescapeString(item.Description)
+
+	}
+	return rssFeed
+}
+
+// call API to fetch the RSS Feed and unmarshal into XML
+func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
+	// Create HTTP GET Request. Shorthand //	res, err := http.Get(apiConf.Next)
+	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
+	if err != nil {
+		return &RSSFeed{}, fmt.Errorf("could not create request: %w", err)
+	}
+	// Set Headers
+	req.Header.Set("Content-Type", "application/xml")
+	req.Header.Set("User-Agent", "gator")
+
+	// Create a Client object, make the HTTP Request and receive the HTTP Response
+	client := &http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		return &RSSFeed{}, fmt.Errorf("network Error: %v", err)
+	}
+	defer res.Body.Close()
+
+	// Verify successful HTTP GET Request
+	if res.StatusCode != http.StatusOK {
+		return &RSSFeed{}, fmt.Errorf("could not retrieve those location areas. non-OK HTTP status: %s", res.Status)
+	}
+	if res.StatusCode > 299 {
+		return &RSSFeed{}, fmt.Errorf("Response failed with status code: %d and\nbody: %v\n", res.StatusCode, res.Body)
+	}
+
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		return &RSSFeed{}, fmt.Errorf("could not read response body: %w", err)
+	}
+
+	var rssFeed RSSFeed
+	if err := xml.Unmarshal(data, &rssFeed); err != nil {
+		return &RSSFeed{}, fmt.Errorf("could not unmarshal: %w", err)
+	}
+	return &rssFeed, nil
 }
 
 func main() {
@@ -75,6 +175,7 @@ func main() {
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAgg)
 
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
