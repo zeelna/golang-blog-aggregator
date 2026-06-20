@@ -176,6 +176,7 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAgg)
+	cmds.register("addfeed", handlerAddFeed)
 
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
@@ -288,6 +289,44 @@ func handlerUsers(s *State, cmd command) error {
 			fmt.Printf("* %s\n", user.Name)
 		}
 	}
+	return nil
+}
+
+func handlerAddFeed(s *State, cmd command) error {
+	if len(cmd.args) < 2 {
+		return fmt.Errorf("error, command <addfeed> expects a two argument. Usage: addfeed my_feed https://example.org")
+	}
+	// Get current logged (from .gatorconfig.json), as mark as author of the feed
+	username := (*s).config.CurrentUsername
+	// Retrieve that username from table 'users' and get ID
+	user, err := s.db.GetUser(context.Background(), username)
+	if err != nil {
+		return err
+	}
+	// 'addfeed' command requires two arguments, to set the new Feed entry in database
+	feedName := cmd.args[0]
+	feedUrl := cmd.args[1]
+	// connect the feed to the username
+	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+		ID:        uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name:      feedName,
+		Url:       feedUrl,
+		UserID:    user.ID, // retrieve above, from 'users' table
+	})
+	if err != nil {
+		return fmt.Errorf("error: could not create feed due to failed SQL operation. ERR: %v", err)
+	}
+
+	fmt.Printf("- Feed -\n")
+	fmt.Printf("ID: %v\n", feed.ID)
+	fmt.Printf("Created At: %v\n", feed.CreatedAt)
+	fmt.Printf("Updated At: %v\n", feed.UpdatedAt)
+	fmt.Printf("Name: %v\n", feed.Name)
+	fmt.Printf("URL: %v\n", feed.Url)
+	fmt.Printf("Author ID: %v\n", feed.UserID)
+
 	return nil
 }
 
