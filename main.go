@@ -197,6 +197,7 @@ func main() {
 	cmds.register("feeds", handlerFeeds)
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
+	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 
 	// DEBUG:
 	//fmt.Printf("%v\n", cmds)
@@ -405,10 +406,29 @@ func handlerFollowing(s *State, cmd command, user database.User) error {
 		return err
 	} // uses methods in internal/database/feed_follows.sql.go
 
-	fmt.Println("# Feed Follows #")
-	for _, follow := range follows {
-		fmt.Println("Feed name: %s\n", follow.FeedName)
+	if len(follows) == 0 {
+		fmt.Println("No feeds followed")
+		return nil
 	}
+
+	for _, follow := range follows {
+		fmt.Printf("Feed name: %s\n", follow.FeedName)
+	}
+	return nil
+}
+
+// <unfollow> command accepts a feed's URL as argument, and unfollows the current user
+func handlerUnfollow(s *State, cmd command, user database.User) error {
+	url := cmd.args[0]
+	feed, err := s.db.GetFeed(context.Background(), url)
+	if err != nil {
+		return err
+	} // uses methods in internal/database/feeds.sql.go
+
+	err = s.db.DeleteFeedFollow(context.Background(), feed.ID)
+	if err != nil {
+		return err
+	} // uses methods in internal/database/feed_follows.sql.go
 	return nil
 }
 
