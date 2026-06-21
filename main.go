@@ -4,25 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"encoding/xml"
+	"fmt"
 	"html"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
-	"github.com/zeelna/golang-blog-aggregator/internal/database"
-)
-
-import (
-	//"bufio"
-	"fmt"
-	"log"
-	"os"
-	//"github.com/zeelna/golang-blog-aggregator/internal/cmds"
 	"github.com/zeelna/golang-blog-aggregator/internal/config"
+	"github.com/zeelna/golang-blog-aggregator/internal/database"
 )
 
 type State struct {
@@ -79,29 +74,6 @@ func handlerAgg(s *State, cmd command) error {
 	for ; ; <-ticker.C {
 		scrapeFeeds(s)
 	}
-
-	/*
-		feedUrl := "https://www.wagslane.dev/index.xml"
-		feedPointer, err := fetchFeed(context.Background(), feedUrl)
-		if err != nil {
-			return err
-		}
-		feed := decodeHTML(feedPointer)
-
-		// print feed
-		fmt.Printf("Channel Title: %s\n", feed.Channel.Title)
-		fmt.Printf("Channel Link: %s\n", feed.Channel.Link)
-		fmt.Printf("Channel Description: \n%s\n", feed.Channel.Description)
-		fmt.Printf("Channel Items: \n\n")
-
-		for i, item := range feed.Channel.Item {
-			fmt.Printf("\n- Channel Item #%d -\n", i)
-			fmt.Printf("- Title: #%s\n", item.Title)
-			fmt.Printf("- Link: #%s\n", item.Link)
-			fmt.Printf("- Publication Date: #%s\n", item.PubDate)
-			fmt.Printf("- Description: \n#%s\n", item.Description)
-		}
-	*/
 	return nil
 }
 
@@ -184,8 +156,6 @@ func main() {
 	}
 
 	/* Step #2: Read command-line arguments and verify if correct */
-	// DEBUG: Print struct before we write:
-	//fmt.Printf("%+v\n", cfg)
 	if len(os.Args) < 2 {
 		log.Fatalf("error: not enough arguments provided")
 	}
@@ -194,7 +164,6 @@ func main() {
 	cleanedInputs := cleanArgs(argsWithoutProg)
 
 	// Step #3: Create the command, once user's CLI input verified
-	// initialize 'command' object
 	var cmd command
 	cmd, err = makeCommand(cleanedInputs)
 	if err != nil {
@@ -218,19 +187,11 @@ func main() {
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 
-	// DEBUG:
-	//fmt.Printf("%v\n", cmds)
-
 	// Step #5: Run the command
 	if err := cmds.run(&state, cmd); err != nil {
 		log.Fatal(err)
 	}
-
-	// DEBUG:
-	//fmt.Printf("%+v\n", state.config)
-
 	return
-
 } // end of main
 
 type command struct {
@@ -283,7 +244,6 @@ func handlerBrowse(s *State, cmd command, user database.User) error {
 		fmt.Printf("Reader User Name: %v\n", post.UserName)
 		fmt.Printf("Post Feed ID: %v\n", post.FeedID)
 		fmt.Printf("Post User ID: %v\n", post.UserID)
-
 	}
 	return nil
 }
@@ -539,9 +499,7 @@ func scrapeFeeds(s *State) error {
 		}
 		fmt.Printf("- Title: #%s\n", createdPost.Title)
 	}
-
 	return nil
-
 }
 
 // <unfollow> command accepts a feed's URL as argument, and unfollows the current user
